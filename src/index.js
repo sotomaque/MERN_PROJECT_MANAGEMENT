@@ -1,6 +1,6 @@
 const { ApolloServer, gql } = require('apollo-server');
 const dotenv = require('dotenv');
-const { MongoClient, ObjectID } = require('mongodb');
+const { MongoClient, ObjectID, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -21,7 +21,8 @@ const getUserFromToken = async (token, db) => {
 const typeDefs = gql`
   #root query
   type Query {
-    myProjectList: [Project!]!
+    myProjects: [Project!]!
+    getProject(id: ID!): Project
   }
 
   #root mutation
@@ -32,6 +33,9 @@ const typeDefs = gql`
 
     # project mutations
     createProject(input: ProjectInput!): Project!
+    updateProject(input: UpdateProjectInput!): Project!
+    deleteProject(id: ID!): Boolean!
+    addUserToProject(input: AddUserToProjectInput!): Project!
   }
 
   #inputs
@@ -48,6 +52,15 @@ const typeDefs = gql`
   input ProjectInput {
     title: String!
     status: Status
+  }
+  input UpdateProjectInput {
+    id: ID!
+    title: String
+    status: Status
+  }
+  input AddUserToProjectInput {
+    projectId: ID!
+    userId: ID!
   }
 
   #types
@@ -94,12 +107,12 @@ const typeDefs = gql`
 
 const resolvers = {
   Query: {
-    myProjectList: async (_, __, { db, user }) => {
+    myProjects: async (_, __, { db, user }) => {
       // Protected Route
       if (!user) throw new Error('Authentication Error. Please sign in.');
 
       // Get Projects where user making query's userId is in the Projects userIds array
-      const projectList = await db
+      const projects = await db
         .collection('Projects')
         .find({
           userIds: user._id,
@@ -107,7 +120,15 @@ const resolvers = {
         .toArray();
 
       // and return array
-      return projectList;
+      return projects;
+    },
+    getProject: async (_, { id }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      // TODO: only project collaborators should be able to get
+      return await db.collection('Projects').findOne({ _id: ObjectId(id) });
     },
   },
   Mutation: {
@@ -118,6 +139,8 @@ const resolvers = {
         ...input,
         password: _password,
       };
+      // TODO: ensure we dont already have that email registered
+
       // persist to DB
       const result = await db.collection('Users').insertOne(newUser);
       const user = result.ops[0];
@@ -153,6 +176,98 @@ const resolvers = {
       };
       const result = await db.collection('Projects').insertOne(newProject);
       return result.ops[0];
+    },
+    updateProject: async (_, { input }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      // validate input
+      const { id, title = '', status = '' } = input;
+      if (!title && !status) {
+        throw new Error('Please provide either a title or status to update');
+      }
+
+      if (title && status) {
+        await db.collection('Projects').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              title,
+              status,
+            },
+          }
+        );
+      } else if (title) {
+        await db.collection('Projects').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              title,
+            },
+          }
+        );
+      } else {
+        await db.collection('Projects').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              status,
+            },
+          }
+        );
+      }
+
+      // Return updated Project
+      return await db.collection('Projects').findOne({ _id: ObjectID(id) });
+    },
+    deleteProject: async (_, { id }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      // TODO: only project collaborators should be able to delete
+      await db.collection('Projects').removeOne({ _id: ObjectId(id) });
+      return true;
+    },
+    addUserToProject: async (_, { input }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      const { projectId, userId } = input;
+      // TODO: only project collaborators should be add more collaborators
+
+      // ensure project exists
+      const project = await db.collection('Projects').findOne({
+        _id: ObjectID(projectId),
+      });
+      if (!project) throw new Error('Invlaid ProjectID provided');
+      // ensure we dont already have user on project
+      if (
+        project.userIds.find((dbId) => dbId.toString() === userId.toString())
+      ) {
+        return project;
+      }
+      await db.collection('Projects').updateOne(
+        {
+          _id: ObjectID(projectId),
+        },
+        {
+          $push: {
+            userIds: ObjectId(userId),
+          },
+        }
+      );
+      //
+      project.userIds.push(ObjectId(userId));
+      return project;
     },
   },
 
