@@ -21,6 +21,7 @@ const getUserFromToken = async (token, db) => {
 const typeDefs = gql`
   #root query
   type Query {
+    # project queries
     myProjects: [Project!]!
     getProject(id: ID!): Project
   }
@@ -36,6 +37,10 @@ const typeDefs = gql`
     updateProject(input: UpdateProjectInput!): Project!
     deleteProject(id: ID!): Boolean!
     addUserToProject(input: AddUserToProjectInput!): Project!
+
+    # todo mutations
+    createTodo(input: TodoInput!): Todo!
+    updateTodo(input: UpdateTodoInput!): Todo!
   }
 
   #inputs
@@ -61,6 +66,16 @@ const typeDefs = gql`
   input AddUserToProjectInput {
     projectId: ID!
     userId: ID!
+  }
+  input TodoInput {
+    content: String!
+    projectId: ID!
+    status: Status
+  }
+  input UpdateTodoInput {
+    id: ID!
+    content: String
+    status: Status
   }
 
   #types
@@ -92,6 +107,7 @@ const typeDefs = gql`
     content: String!
     status: Status
     isCompleted: Boolean!
+    createdAt: String!
 
     project: Project!
   }
@@ -106,6 +122,7 @@ const typeDefs = gql`
 `;
 
 const resolvers = {
+  // Root Resolvers
   Query: {
     myProjects: async (_, __, { db, user }) => {
       // Protected Route
@@ -269,8 +286,91 @@ const resolvers = {
       project.userIds.push(ObjectId(userId));
       return project;
     },
-  },
 
+    // Todo Resolvers
+    createTodo: async (_, { input }, { db, user }) => {
+      // Protected Route
+      if (!user) throw new Error('Authentication Error. Please sign in.');
+
+      const { projectId, content, status } = input;
+      // ensure project exists
+      const project = await db.collection('Projects').findOne({
+        _id: ObjectID(projectId),
+      });
+      if (!project) throw new Error('Invlaid ProjectID provided');
+
+      const newTodo = {
+        content,
+        isCompleted: false,
+        createdAt: new Date().toISOString(),
+        projectId: ObjectId(projectId),
+      };
+      // status is optional so we cant assume we have it above
+      if (status) {
+        newTodo[status] = status;
+      }
+      const result = await db.collection('Todos').insertOne(newTodo);
+      return result.ops[0];
+    },
+    updateTodo: async (_, { input }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      // validate input
+      const { id, content = '', status = '' } = input;
+      if (!content && !status) {
+        throw new Error('Please provide either a status or content to update');
+      }
+      // ensure todo exists
+      const todo = await db.collection('Todos').findOne({
+        _id: ObjectID(id),
+      });
+      if (!todo) {
+        throw new Error('Invalid Todo Id Provided');
+      }
+
+      if (content && status) {
+        await db.collection('Todos').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              content,
+              status,
+            },
+          }
+        );
+      } else if (content) {
+        await db.collection('Todos').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              content,
+            },
+          }
+        );
+      } else {
+        await db.collection('Todos').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              status,
+            },
+          }
+        );
+      }
+
+      // Return updated Todo
+      return await db.collection('Todos').findOne({ _id: ObjectID(id) });
+    },
+  },
+  // Custom Resolvers
   User: {
     id: ({ _id, id }) => _id || id,
   },
@@ -281,6 +381,16 @@ const resolvers = {
       Promise.all(
         userIds.map((userId) => db.collection('Users').findOne({ _id: userId }))
       ),
+    todos: async ({ _id }, _, { db }) =>
+      await db
+        .collection('Todos')
+        .find({ projectId: ObjectID(_id) })
+        .toArray(),
+  },
+  Todo: {
+    id: ({ _id, id }) => _id || id,
+    project: async ({ projectId }, _, { db }) =>
+      await db.collection('Projects').findOne({ _id: ObjectId(projectId) }),
   },
 };
 
