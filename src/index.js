@@ -41,6 +41,7 @@ const typeDefs = gql`
     # todo mutations
     createTodo(input: TodoInput!): Todo!
     updateTodo(input: UpdateTodoInput!): Todo!
+    deleteTodo(id: ID!): Boolean!
   }
 
   #inputs
@@ -76,6 +77,7 @@ const typeDefs = gql`
     id: ID!
     content: String
     status: Status
+    isCompleted: Boolean
   }
 
   #types
@@ -318,9 +320,11 @@ const resolvers = {
         throw new Error('Authentication Error. Please sign in.');
       }
       // validate input
-      const { id, content = '', status = '' } = input;
-      if (!content && !status) {
-        throw new Error('Please provide either a status or content to update');
+      const { id, content = '', status = '', isCompleted = '' } = input;
+      if (!content && !status && isCompleted === '') {
+        throw new Error(
+          'Please provide either a status, content, or isCompleted to update'
+        );
       }
       // ensure todo exists
       const todo = await db.collection('Todos').findOne({
@@ -329,7 +333,7 @@ const resolvers = {
       if (!todo) {
         throw new Error('Invalid Todo Id Provided');
       }
-
+      // Find and update
       if (content && status) {
         await db.collection('Todos').updateOne(
           {
@@ -353,7 +357,7 @@ const resolvers = {
             },
           }
         );
-      } else {
+      } else if (status) {
         await db.collection('Todos').updateOne(
           {
             _id: ObjectID(id),
@@ -365,9 +369,30 @@ const resolvers = {
           }
         );
       }
+      if (isCompleted !== '') {
+        await db.collection('Todos').updateOne(
+          {
+            _id: ObjectID(id),
+          },
+          {
+            $set: {
+              isCompleted,
+            },
+          }
+        );
+      }
 
       // Return updated Todo
       return await db.collection('Todos').findOne({ _id: ObjectID(id) });
+    },
+    deleteTodo: async (_, { id }, { db, user }) => {
+      // Protected Route
+      if (!user) {
+        throw new Error('Authentication Error. Please sign in.');
+      }
+      // TODO: only project collaborators should be able to delete
+      await db.collection('Todos').removeOne({ _id: ObjectId(id) });
+      return true;
     },
   },
   // Custom Resolvers
@@ -376,7 +401,16 @@ const resolvers = {
   },
   Project: {
     id: ({ _id, id }) => _id || id,
-    progress: () => 0,
+    progress: async ({ _id }, _, { db }) => {
+      const todos = await db
+        .collection('Todos')
+        .find({ projectId: ObjectID(_id) })
+        .toArray();
+      const completed = todos.filter(
+        (todo) => todo.status === 'COMPLETED' || todo.isCompleted
+      );
+      return completed.length > 0 ? 100 * (completed.length / todos.length) : 0;
+    },
     users: async ({ userIds }, _, { db }) =>
       Promise.all(
         userIds.map((userId) => db.collection('Users').findOne({ _id: userId }))
