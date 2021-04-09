@@ -1,15 +1,55 @@
-import * as React from 'react';
-import { StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { FlatList, StyleSheet, TextInput } from 'react-native';
 
-import EditScreenInfo from '../components/EditScreenInfo';
-import { Text, View } from '../components/Themed';
+import { View } from '../components/Themed';
+import TodoItem from '../components/TodoItem';
 
 export default function TabOneScreen() {
+  const [title, setTitle] = useState('');
+  const [todos, setTodos] = useState([
+    {
+      id: '1',
+      content: 'wake up',
+      isCompleted: false,
+    },
+    {
+      id: '2',
+      content: 'wake up again',
+      isCompleted: false,
+    },
+    {
+      id: '3',
+      content: 'go on a walk',
+      isCompleted: false,
+    },
+  ]);
+
+  const createNewItem = (index: number) => {
+    const newTodos = [...todos];
+    newTodos.splice(index, 0, {
+      id: `${index}`,
+      content: '',
+      isCompleted: false,
+    });
+    setTodos(newTodos);
+  };
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Tab One</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <EditScreenInfo path="/screens/TabOneScreen.tsx" />
+      <TextInput
+        onChangeText={(text) => setTitle(text)}
+        placeholder="Title"
+        placeholderTextColor="#444"
+        style={styles.title}
+        value={title}
+      />
+      <FlatList
+        data={todos}
+        renderItem={({ item, index }) => (
+          <TodoItem todo={item} onSubmit={() => createNewItem(index + 1)} />
+        )}
+        style={{ width: '100%' }}
+      />
     </View>
   );
 }
@@ -18,15 +58,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    padding: 12,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: '80%',
+    width: '100%',
+    textAlign: 'center',
+    fontSize: 22,
+    marginVertical: 10,
   },
 });
